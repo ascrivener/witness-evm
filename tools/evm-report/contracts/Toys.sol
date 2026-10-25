@@ -10,7 +10,7 @@ contract Token {
 	mapping(address => mapping(address => uint256)) public allowance;
 	uint256 public totalSupply;
 
-	function deposit() external payable {
+	function deposit() external payable virtual {
 		balanceOf[msg.sender] += msg.value;
 		totalSupply += msg.value;
 	}
@@ -31,6 +31,21 @@ contract Token {
 	function approve(address spender, uint256 value) external returns (bool) {
 		allowance[msg.sender][spender] = value;
 		return true;
+	}
+}
+
+/// A token rigged against bounty hunters: `deposit` refuses the evm-bounty check's hunter
+/// accounts, recomputing them from whatever it can see at run time. Against the check's first
+/// design, which derived them from `block.prevrandao`, that made every report fail, so a protocol
+/// could post a bounty no one could win. Slots as `Token`'s.
+contract RiggedToken is Token {
+	function deposit() external payable override {
+		for (uint8 i = 0; i < 4; i++) {
+			bytes32 h = keccak256(abi.encodePacked("witness evm-bounty hunter", block.prevrandao, i));
+			require(msg.sender != address(uint160(uint256(h))), "no hunters");
+		}
+		balanceOf[msg.sender] += msg.value;
+		totalSupply += msg.value;
 	}
 }
 

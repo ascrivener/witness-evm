@@ -357,6 +357,9 @@ pub fn router_code() -> Bytes {
 pub fn burn_code() -> Bytes {
 	code(include_str!("../contracts/Burn.hex"))
 }
+pub fn rigged_token_code() -> Bytes {
+	code(include_str!("../contracts/RiggedToken.hex"))
+}
 pub fn pair_invariant() -> Bytes {
 	code(include_str!("../contracts/PairInvariant.hex"))
 }
@@ -593,6 +596,63 @@ mod tests {
 		// The swap pays out token 1; the invariant never reads it.
 		case.report.accounts.retain(|a| a.address != token(1));
 		assert_eq!(run(&case), Outcome::TxFailed);
+	}
+
+	/// Hand-assembled: with no calldata, return slot 0; with first byte 1, `TSTORE(0, 1)`; with
+	/// first byte 2, `SSTORE(0, TLOAD(0))`.
+	const TRANSIENT: &str = "3615601e575f3560f81c80600114601757505f5c5f55005b5060015f5d005b5f545f5260205ff3";
+	const T: Address = at(0xf000);
+
+	/// An invariant that holds while `T`'s slot 0 is zero.
+	fn t_slot_zero() -> Bytes {
+		let mut code = hex_bytes("60205f5f5f73").to_vec();
+		code.extend_from_slice(T.as_slice());
+		code.extend_from_slice(&hex_bytes("5afa505f51155f5260205ff3"));
+		code.into()
+	}
+
+	#[test]
+	fn transient_storage_does_not_leak_between_transactions() {
+		let mut world = World::default();
+		world.accounts.insert(COINBASE, Account::eoa(U256::from(ETHER)));
+		world.accounts.insert(T, Account::contract(hex_bytes(TRANSIENT), SMALL_STORAGE));
+		let set = tx(T, Bytes::from_static(&[1]), 100_000);
+		let copy = tx(T, Bytes::from_static(&[2]), 100_000);
+		// In one transaction, TLOAD sees the TSTORE; across two, it must not.
+		let case = case("transient", &world, t_slot_zero(), vec![set, copy], Reads::default());
+		assert_eq!(case.expected, Outcome::Holds);
+		assert_eq!(run(&case), Outcome::Holds);
+	}
+
+	#[test]
+	fn the_transient_harness_sees_a_real_write() {
+		// The control: with SSTORE in place of TSTORE, slot 0 does change, and the invariant sees it.
+		let mut world = World::default();
+		world.accounts.insert(COINBASE, Account::eoa(U256::from(ETHER)));
+		world.accounts.insert(T, Account::contract(hex_bytes(&TRANSIENT.replace("60015f5d", "60015f55")), SMALL_STORAGE));
+		let txs = vec![tx(T, Bytes::from_static(&[1]), 100_000)];
+		let case = case("persistent", &world, t_slot_zero(), txs, Reads::default());
+		assert_eq!(run(&case), Outcome::Violated);
+	}
+
+	#[test]
+	fn a_missing_slot_fails_even_deep_in_a_call() {
+		// The pair reads token 1's balance of itself inside `swap`, three calls deep.
+		let mut case = pair_exploit();
+		let token1 = case.report.accounts.iter_mut().find(|a| a.address == token(1)).unwrap();
+		token1.slots.retain(|s| s.key != B256::from(mapping_slot(pair(0), 0)));
+		assert_eq!(run(&case), Outcome::TxFailed);
+	}
+
+	#[test]
+	#[ignore = "open finding: hunters derive from prevrandao, which contracts can read; fails until they derive from the state root"]
+	fn a_protocol_cannot_single_out_hunters() {
+		// Token 0 refuses deposits from any account it can work out is a hunter. It mustn't be
+		// able to: the exploit still wins.
+		let mut world = pairs_world(1, U256::ZERO);
+		world.accounts.get_mut(&token(0)).unwrap().code = rigged_token_code();
+		let case = case("rigged", &world, pair_invariant(), exploit_txs(), Reads::default());
+		assert_eq!(run(&case), Outcome::Violated);
 	}
 
 	#[test]
