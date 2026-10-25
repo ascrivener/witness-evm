@@ -15,8 +15,8 @@ before and after. If the invariant held and now fails, the bounty pays out, with
 Does verifying a report fit in one JAM refine, 5×10⁹ gas?
 
 **Answer: yes, for the reports that matter, with room to spare.** The toy exploit costs
-1.0×10⁷ gas, 0.2% of the budget. A large DeFi-shaped report (131 accounts, 449 slots, 3.1M EVM
-gas) costs 3.9×10⁸, 8%. Execution is rarely the limit: about 30M EVM gas of pure compute fits,
+9.4×10⁶ gas, 0.2% of the budget. A large DeFi-shaped report (131 accounts, 449 slots, 3.1M EVM
+gas) costs 3.6×10⁸, 7%. Execution is rarely the limit: about 30M EVM gas of pure compute fits,
 more than any single transaction may use since Osaka (2²⁴, about 16.8M), and DeFi-style work,
 mostly storage reads, is about 8× cheaper to replay than that. What grows with a big exploit is
 its footprint, the accounts and slots it touches: proofs are about 3.5 KB an account, so report
@@ -44,15 +44,17 @@ Transactions are unsigned, so who they come from is the check's choice. The firs
 report send from *any* proven account. That is unsound: a report could send as a protocol's
 owner or admin key and "break" the invariant through a privileged function.
 
-Now transactions come only from four **hunter accounts**, addresses derived from the next
-block's `prevrandao` (`hunter(prevrandao, i)`), made up by the check, each holding the bounty's
-`capital` in ETH and nothing else. Nobody could know these addresses at block N, so no contract
-in N's state can single them out: a winning report shows that *anyone* could break the
-invariant. Hunters get tokens as an attacker would, by trading or flash-borrowing them on chain.
+Now transactions come only from four **hunter accounts**, addresses derived from block N's state
+root (`hunter(state_root, i)`), made up by the check, each holding the bounty's `capital` in ETH
+and nothing else. No contract in N's state can single them out: it can't hold a hash of the
+state that holds it, and no opcode reads a state root. (The first version derived them from
+`prevrandao`, which a contract reads with `PREVRANDAO`; see the [review](review.md).) A winning
+report shows that *anyone* could break the invariant. Hunters get tokens as an attacker would, by trading or flash-borrowing them on chain.
 The toy exploit wraps 1 wei of ETH, pays it into the pair and takes 99.8% of the other reserve.
 
-Gas is free (gas price zero, base fee off) and nonces aren't checked, so a report needn't
-account for fees. The invariant is called from a separate empty account (EIP-3607 forbids
+Hunters pay for gas at the block's base fee, with no tip, and their transactions together must
+fit the block's gas limit, so the replay is one mainnet would run. Nonces aren't checked, since
+nothing is signed. The invariant is called from a separate empty account (EIP-3607 forbids
 sending from one with code, which made the first version's invariant call always fail) with
 2²⁴ gas, Osaka's per-transaction cap.
 
@@ -90,19 +92,21 @@ difference between stopping after it and stopping before it (`Report::stop_after
 
 | Case | EVM gas | Accounts | Slots | Report | Decode | Proofs | Invariant (before) | Transactions | Invariant (after) | **Total** | % of 5×10⁹ |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| burn-1m | 1.0M | 2 | 0 | 7.7 KB | 0.18M | 1.96M | 0.50M | 164M | 0.05M | **167M** | 3.3% |
-| burn-10m | 10.0M | 2 | 0 | 7.7 KB | 0.18M | 1.96M | 0.50M | 1,671M | 0.05M | **1,674M** | 33% |
-| burn-30m | 30.0M | 2 | 0 | 7.9 KB | 0.19M | 1.96M | 0.50M | 5,014M | 0.05M | **5,016M** | 100.3% |
-| proofs-10x10 | 0 | 11 | 100 | 297 KB | 6.0M | 71M | 0.50M | 0 | 0.05M | **78M** | 1.6% |
+| burn-1m | 1.0M | 2 | 0 | 7.7 KB | 0.18M | 1.98M | 0.50M | 164M | 0.06M | **167M** | 3.3% |
+| burn-10m | 10.0M | 2 | 0 | 7.7 KB | 0.18M | 1.98M | 0.50M | 1,671M | 0.06M | **1,674M** | 33% |
+| burn-30m | 30.0M | 2 | 0 | 7.9 KB | 0.19M | 1.98M | 0.50M | 5,014M | 0.05M | **5,016M** | 100.3% |
+| proofs-10x10 | 0 | 11 | 100 | 295 KB | 5.9M | 71M | 0.50M | 0 | 0.05M | **77M** | 1.5% |
 | proofs-100x10 | 0 | 101 | 1,000 | 2.9 MB | 59M | 705M | 0.50M | 0 | 0.06M | **764M** | 15% |
-| proofs-400x10 | 0 | 401 | 4,000 | 11.7 MB | 236M | 2,821M | 0.50M | 0 | 0.06M | **3,058M** | 61% |
-| pair-swap | 0.15M | 4 | 9 | 32 KB | 0.69M | 7.9M | 0.61M | 0.94M | 0.13M | **10.3M** | 0.2% |
-| **pair-exploit** | 0.15M | 4 | 9 | 32 KB | 0.69M | 7.9M | 0.61M | 0.94M | 0.13M | **10.3M** | 0.2% |
-| route-4 | 0.22M | 11 | 29 | 91 KB | 1.9M | 22M | 0.61M | 3.9M | 0.13M | **29M** | 0.6% |
-| route-16 | 0.80M | 35 | 113 | 318 KB | 6.7M | 77M | 0.61M | 15.5M | 0.13M | **100M** | 2.0% |
-| route-64 | 3.1M | 131 | 449 | 1.2 MB | 26M | 298M | 0.60M | 62M | 0.14M | **387M** | 7.7% |
+| proofs-400x10 | 0 | 401 | 4,000 | 11.7 MB | 236M | 2,824M | 0.50M | 0 | 0.06M | **3,061M** | 61% |
+| pair-swap | 0.15M | 4 | 9 | 29 KB | 0.64M | 7.1M | 0.61M | 0.94M | 0.14M | **9.4M** | 0.2% |
+| **pair-exploit** | 0.15M | 4 | 9 | 29 KB | 0.63M | 7.1M | 0.61M | 0.94M | 0.14M | **9.4M** | 0.2% |
+| route-4 | 0.22M | 11 | 29 | 86 KB | 1.8M | 21M | 0.61M | 3.9M | 0.14M | **27M** | 0.5% |
+| route-16 | 0.80M | 35 | 113 | 296 KB | 6.3M | 72M | 0.62M | 15.5M | 0.14M | **95M** | 1.9% |
+| route-64 | 3.1M | 131 | 449 | 1.1 MB | 24M | 276M | 0.61M | 62M | 0.14M | **363M** | 7.3% |
 
-(M = 10⁶ gas. "Invariant (before)" includes building revm's context.)
+(M = 10⁶ gas. "Invariant (before)" includes building revm's context. Measured after the
+[adversarial review](review.md)'s fixes: hunters pay gas, and absent keys' proofs are shallower
+than the first measurements', since the synthetic tries now pad only keys that exist.)
 
 ### What dominates
 
@@ -154,17 +158,16 @@ Blocking, found by the spike, now fixed in witness:
    also lose P-256, which passkey wallets use. **Done instead:** `MAX_CHECK_LEN` is now 2 MiB.
    A reveal carries the blob as an extrinsic, 1.1 MB of a package's 13.8 MB input.
 2. **Reports must travel as extrinsics.** A reveal's witness was inline only, at most 64 KiB
-   (`MAX_WITNESS_LEN`); even the toy exploit's report is 32 KB, and realistic ones are hundreds of
+   (`MAX_WITNESS_LEN`); even the toy exploit's report is 29 KB, and realistic ones are hundreds of
    KB to a few MB. **Done:** `Reveal`'s witness is now a `Witness`, inline or an extrinsic, as
    `Attest`'s is; the commitment is to the witness's bytes either way.
 
 Soundness, before money depends on it:
 
-3. **Adversarial review of the check.** The spike found two flaws in its own first draft (any
-   sender; an invariant call that always failed). Still to review: which revm `cfg` relaxations
-   are safe (nonce checks off is; balance checks stay on), how precompiles and `SELFDESTRUCT`
-   behave on proven state, `CREATE` addresses that collide with proven-absent accounts, and the
-   block environment, which the maker sets in the params.
+3. **Adversarial review of the check.** First pass done: [review.md](review.md). It fixed one
+   flaw a malicious protocol could use (hunters a contract could recognise) and three ways the
+   replay differed from mainnet, and tested the rest. Before real money: a second, outside
+   review, and the open items it lists.
 4. **Invariants that revert.** If the invariant reverts or runs out of gas after the
    transactions, the report loses, rather than letting a hunter "break" an invariant by making
    it too expensive to evaluate. So invariants must be cheap and total; that is guidance for
@@ -225,7 +228,7 @@ a service in itself: probably the business's main product, more than the check.
 3. Bounty terms for disclosure: patch window, minimum commit-to-reveal delay.
 4. A witness-sim demo, **started**: `scripts/demo.sh` runs a bounty from posting to
    payout. A protocol escrows 5000 on its pair; a fair swap and an exploit on forged state are
-   refused; the real exploit (a 32 KB report, carried as an extrinsic, 1.0×10⁷ gas to check)
+   refused; the real exploit (a 29 KB report, carried as an extrinsic, 9.4×10⁶ gas to check)
    opens the claim window and is paid at finalize. Still to do: about a dozen cases, including
    measurements on real mainnet state (needs an RPC, and an archive node for older blocks), and
    real-size contract code.

@@ -13,7 +13,7 @@ type = "authorizer"
 [dependencies]
 witness-check = { workspace = true, features = ["alloc"] }
 polkavm-derive.workspace = true
-revm = { version = "43.0.3", default-features = false, features = ["optional_no_base_fee"] }
+revm = { version = "43.0.3", default-features = false }
 alloy-trie = { version = "0.9.8", default-features = false }
 alloy-rlp = { version = "0.3", default-features = false, features = ["derive"] }
 

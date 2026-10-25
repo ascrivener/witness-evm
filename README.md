@@ -7,7 +7,7 @@ human judge: the check replays the report's transactions in [revm](https://githu
 against Merkle-proven Ethereum state and runs the invariant before and after.
 
 It runs a bounty end to end in witness-sim: posted, a fair swap and a forged report refused, the
-real exploit (a 32 KB report, 1.0×10⁷ gas to check) accepted and paid. See
+real exploit (a 29 KB report, 9.4×10⁶ gas to check) accepted and paid. See
 [docs/design.md](docs/design.md) for the measurements, the go/no-go, and what's next.
 
 ## How it works
@@ -20,9 +20,12 @@ real exploit (a 32 KB report, 1.0×10⁷ gas to check) accepted and paid. See
 - **The check** verifies every proof, runs the invariant (it must hold), replays the
   transactions in revm on the proven state only (reading anything unproven fails), and runs the
   invariant again. The report wins iff it now fails.
-- **Who sends:** four hunter accounts derived from the next block's `prevrandao`, made up by the
-  check with the bounty's ETH capital. Nobody could know them at block N, so a report can't act
-  as a protocol's owner: a win shows that *anyone* could break the invariant.
+- **Who sends:** four hunter accounts derived from block N's state root, made up by the check
+  with the bounty's ETH capital. No contract can know or compute them, so a report can't act as a
+  protocol's owner, and a protocol can't refuse hunters: a win shows that *anyone* could break
+  the invariant.
+- **As mainnet would run it:** hunters pay gas at the block's base fee, and their transactions
+  together fit one block's gas limit, so a win is one a real attacker could have.
 - **Disclosure:** the hunter commits (witness's commit-reveal fixes priority), discloses
   privately, and reveals after the patch. The check replays block N's state, so the report still
   wins against the patched protocol, and the protocol can't refuse to pay.
@@ -34,8 +37,8 @@ Measured in witness-sim (PolkaVM's recompiler, PolkaJam v0.1.29's gas), against 
 
 | Report | Gas | Of 5×10⁹ |
 |---|---:|---:|
-| The toy exploit: 4 accounts, 9 slots | 1.0×10⁷ | 0.2% |
-| A 64-hop swap route: 131 accounts, 449 slots, 3.1M EVM gas | 3.9×10⁸ | 8% |
+| The toy exploit: 4 accounts, 9 slots | 9.4×10⁶ | 0.2% |
+| A 64-hop swap route: 131 accounts, 449 slots, 3.1M EVM gas | 3.6×10⁸ | 7% |
 | 400 accounts × 10 slots, proofs only | 3.1×10⁹ | 61% |
 | 30M EVM gas of pure compute | 5.0×10⁹ | 100% |
 
@@ -52,6 +55,7 @@ tools/evm-report/          builds test cases: toy contracts (contracts/Toys.sol)
 scripts/gas.sh             measures the check's gas, phase by phase, on evm-report's cases
 scripts/demo.sh            a settled bug bounty in witness-sim: posted, three reports revealed, paid
 docs/design.md             the spike: design, measurements, go/no-go, scope
+docs/review.md             adversarial review of the check, first pass: what's fixed, what's open
 ```
 
 ## Build and test
@@ -79,4 +83,6 @@ read access to its contents, saved as the `WITNESS_READ_TOKEN` secret.
   real-size contract code.
 - `BLOCKHASH` fails the check.
 - The protocol commits its own state root; a light client would remove that trust.
-- The check hasn't had an adversarial review. Don't put real money behind it yet.
+- The check has had one adversarial review, by its author's tooling
+  ([docs/review.md](docs/review.md)), with open items. Don't put real money behind it before an
+  outside review.
