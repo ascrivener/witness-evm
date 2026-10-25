@@ -182,7 +182,10 @@ fn rlp(value: &impl Encodable) -> Vec<u8> {
 	alloy_rlp::encode(value)
 }
 
-/// Prove `reads` against the world's (padded) state: its root and the report's accounts.
+/// Prove `reads` against the world's (padded) state: its root and the report's accounts. Every
+/// account and slot in the world is padded, whether read or not, so the root depends on the world
+/// alone, as a real chain's does: a bounty's root is fixed before anyone writes a report. (An
+/// absence proof, of a key the world hasn't got, is shallower than mainnet's.)
 pub fn prove(world: &World, reads: &Reads) -> (B256, Vec<AccountWitness>) {
 	let mut rng = Rng(0x5eed);
 	let mut state = Leaves::new();
@@ -200,12 +203,11 @@ pub fn prove(world: &World, reads: &Reads) -> (B256, Vec<AccountWitness>) {
 					.filter(|(_, v)| !v.is_zero())
 					.map(|(k, v)| (Nibbles::unpack(keccak256(B256::from(*k))), rlp(v)))
 					.collect();
-				let targets: Vec<Nibbles> = slots.iter().map(|k| Nibbles::unpack(keccak256(B256::from(*k)))).collect();
-				if read {
-					for target in &targets {
-						pad(&mut leaves, target, a.storage_shape, &mut rng, &|rng| rlp(&U256::from_be_bytes(rng.word().0)));
-					}
+				let keys: Vec<Nibbles> = leaves.keys().copied().collect();
+				for key in &keys {
+					pad(&mut leaves, key, a.storage_shape, &mut rng, &|rng| rlp(&U256::from_be_bytes(rng.word().0)));
 				}
+				let targets: Vec<Nibbles> = slots.iter().map(|k| Nibbles::unpack(keccak256(B256::from(*k)))).collect();
 				trie(&leaves, &targets)
 			},
 			None => (EMPTY_ROOT_HASH, slots.iter().map(|_| Vec::new()).collect()),
@@ -217,8 +219,6 @@ pub fn prove(world: &World, reads: &Reads) -> (B256, Vec<AccountWitness>) {
 		let key = Nibbles::unpack(keccak256(address));
 		if account.is_some() {
 			state.insert(key, rlp(&trie_account));
-		}
-		if read {
 			pad(&mut state, &key, MAINNET_ACCOUNTS, &mut rng, &|rng| {
 				rlp(&TrieAccount {
 					nonce: rng.next() % 1000,
@@ -227,6 +227,8 @@ pub fn prove(world: &World, reads: &Reads) -> (B256, Vec<AccountWitness>) {
 					code_hash: rng.word(),
 				})
 			});
+		}
+		if read {
 			let slots = slots
 				.iter()
 				.zip(slot_proofs)
@@ -288,6 +290,8 @@ pub fn bounty(world: &World, invariant: Bytes, reports: Vec<Vec<Tx>>, extra: Rea
 		capital: U256::from(CAPITAL),
 		invariant,
 	};
+	// The root comes first: the hunters' addresses derive from it.
+	params.state_root = prove(world, &Reads::default()).0;
 	let mut recorder = Recorder { world, made_up: made_up(&params).into_iter().collect(), reads: extra };
 	let expected: Vec<Outcome> = reports
 		.iter()
@@ -296,7 +300,7 @@ pub fn bounty(world: &World, invariant: Bytes, reports: Vec<Vec<Tx>>, extra: Rea
 		})
 		.collect();
 	let (root, accounts) = prove(world, &recorder.reads);
-	params.state_root = root;
+	assert_eq!(root, params.state_root, "the root depends on the world alone");
 	let reports = reports
 		.into_iter()
 		.zip(expected)
@@ -357,6 +361,9 @@ pub fn router_code() -> Bytes {
 pub fn burn_code() -> Bytes {
 	code(include_str!("../contracts/Burn.hex"))
 }
+pub fn rigged_token_code() -> Bytes {
+	code(include_str!("../contracts/RiggedToken.hex"))
+}
 pub fn pair_invariant() -> Bytes {
 	code(include_str!("../contracts/PairInvariant.hex"))
 }
@@ -391,8 +398,14 @@ pub fn tx(to: Address, data: Bytes, gas_limit: u64) -> Tx {
 	Tx { hunter: 0, create: false, to, value: U256::ZERO, data, gas_limit }
 }
 
-pub fn hunter() -> Address {
-	evm_bounty_check::hunter(PREVRANDAO, 0)
+/// The world's state root, which a bounty on it commits to.
+pub fn state_root(world: &World) -> B256 {
+	prove(world, &Reads::default()).0
+}
+
+/// Hunter 0's address, in a bounty on `world`.
+pub fn hunter(world: &World) -> Address {
+	evm_bounty_check::hunter(state_root(world), 0)
 }
 
 /// Tokens 0..=n and pairs 0..n, each pair holding [`RESERVE`] of both its tokens, and the router
@@ -441,38 +454,42 @@ fn deposit(amount: U256) -> Tx {
 }
 
 /// A swap on pair 0 the way a trader would: wrap ETH, pay it in, then take the fair amount out.
-pub fn fair_swap_txs() -> Vec<Tx> {
+pub fn fair_swap_txs(hunter: Address) -> Vec<Tx> {
 	let amount = U256::from(1_000 * ETHER);
 	vec![
 		deposit(amount),
 		tx(token(0), call("transfer(address,uint256)", &[word(pair(0)), amount]), 200_000),
-		tx(pair(0), call("swap(uint256,uint256,address)", &[U256::ZERO, amount_out(amount), word(hunter())]), 300_000),
+		tx(pair(0), call("swap(uint256,uint256,address)", &[U256::ZERO, amount_out(amount), word(hunter)]), 300_000),
 	]
 }
 
 /// The planted bug: pay 1 wei in, take 99.8% of the other reserve out. Pair 0's product drops.
-pub fn exploit_txs() -> Vec<Tx> {
+pub fn exploit_txs(hunter: Address) -> Vec<Tx> {
 	let reserve = U256::from(RESERVE);
 	vec![
 		deposit(U256::from(1)),
 		tx(token(0), call("transfer(address,uint256)", &[word(pair(0)), U256::from(1)]), 200_000),
-		tx(pair(0), call("swap(uint256,uint256,address)", &[U256::ZERO, reserve - reserve / U256::from(500), word(hunter())]), 300_000),
+		tx(pair(0), call("swap(uint256,uint256,address)", &[U256::ZERO, reserve - reserve / U256::from(500), word(hunter)]), 300_000),
 	]
 }
 
 pub fn pair_swap() -> Case {
-	case("pair-swap", &pairs_world(1, U256::ZERO), pair_invariant(), fair_swap_txs(), Reads::default())
+	let world = pairs_world(1, U256::ZERO);
+	case("pair-swap", &world, pair_invariant(), fair_swap_txs(hunter(&world)), Reads::default())
 }
 
 pub fn pair_exploit() -> Case {
-	case("pair-exploit", &pairs_world(1, U256::ZERO), pair_invariant(), exploit_txs(), Reads::default())
+	let world = pairs_world(1, U256::ZERO);
+	case("pair-exploit", &world, pair_invariant(), exploit_txs(hunter(&world)), Reads::default())
 }
 
 /// The demo's bounty on pair 0, and three reports against it: a fair swap (the invariant holds),
 /// the exploit (it breaks), and the exploit on forged state, pair 0's reserves claimed tiny, which
 /// no proof backs.
 pub fn pair_bounty() -> (Params, [Report; 3]) {
-	let (params, reports) = bounty(&pairs_world(1, U256::ZERO), pair_invariant(), vec![fair_swap_txs(), exploit_txs()], Reads::default());
+	let world = pairs_world(1, U256::ZERO);
+	let h = hunter(&world);
+	let (params, reports) = bounty(&world, pair_invariant(), vec![fair_swap_txs(h), exploit_txs(h)], Reads::default());
 	let [(fair, Outcome::Holds), (exploit, Outcome::Violated)] = <[_; 2]>::try_from(reports).unwrap() else {
 		panic!("the replays didn't go as planned");
 	};
@@ -582,9 +599,11 @@ mod tests {
 		let case = pair_swap();
 		let token = case.report.accounts.iter().find(|a| a.address == token(0)).unwrap();
 		assert_eq!(token.proof.len(), MAINNET_ACCOUNTS.full + MAINNET_ACCOUNTS.sparse + 1);
-		// A present slot's proof ends in its leaf; an absent one's at the branch without it.
-		let depth = BIG_STORAGE.full + BIG_STORAGE.sparse;
-		assert!(token.slots.iter().all(|s| s.proof.len() == depth + !s.value.is_zero() as usize));
+		// Present slots are padded like mainnet's; absent ones (the hunter's balance, before it
+		// deposits) aren't, so their proofs are shallower.
+		let depth = BIG_STORAGE.full + BIG_STORAGE.sparse + 1;
+		assert!(token.slots.iter().filter(|s| !s.value.is_zero()).all(|s| s.proof.len() == depth));
+		assert!(token.slots.iter().any(|s| s.value.is_zero()), "the hunter's balance is proven absent");
 	}
 
 	#[test]
@@ -592,6 +611,88 @@ mod tests {
 		let mut case = pair_exploit();
 		// The swap pays out token 1; the invariant never reads it.
 		case.report.accounts.retain(|a| a.address != token(1));
+		assert_eq!(run(&case), Outcome::TxFailed);
+	}
+
+	/// Hand-assembled: with no calldata, return slot 0; with first byte 1, `TSTORE(0, 1)`; with
+	/// first byte 2, `SSTORE(0, TLOAD(0))`.
+	const TRANSIENT: &str = "3615601e575f3560f81c80600114601757505f5c5f55005b5060015f5d005b5f545f5260205ff3";
+	const T: Address = at(0xf000);
+
+	/// An invariant that holds while `T`'s slot 0 is zero.
+	fn t_slot_zero() -> Bytes {
+		let mut code = hex_bytes("60205f5f5f73").to_vec();
+		code.extend_from_slice(T.as_slice());
+		code.extend_from_slice(&hex_bytes("5afa505f51155f5260205ff3"));
+		code.into()
+	}
+
+	#[test]
+	fn transient_storage_does_not_leak_between_transactions() {
+		let mut world = World::default();
+		world.accounts.insert(COINBASE, Account::eoa(U256::from(ETHER)));
+		world.accounts.insert(T, Account::contract(hex_bytes(TRANSIENT), SMALL_STORAGE));
+		let set = tx(T, Bytes::from_static(&[1]), 100_000);
+		let copy = tx(T, Bytes::from_static(&[2]), 100_000);
+		// In one transaction, TLOAD sees the TSTORE; across two, it must not.
+		let case = case("transient", &world, t_slot_zero(), vec![set, copy], Reads::default());
+		assert_eq!(case.expected, Outcome::Holds);
+		assert_eq!(run(&case), Outcome::Holds);
+	}
+
+	#[test]
+	fn the_transient_harness_sees_a_real_write() {
+		// The control: with SSTORE in place of TSTORE, slot 0 does change, and the invariant sees it.
+		let mut world = World::default();
+		world.accounts.insert(COINBASE, Account::eoa(U256::from(ETHER)));
+		world.accounts.insert(T, Account::contract(hex_bytes(&TRANSIENT.replace("60015f5d", "60015f55")), SMALL_STORAGE));
+		let txs = vec![tx(T, Bytes::from_static(&[1]), 100_000)];
+		let case = case("persistent", &world, t_slot_zero(), txs, Reads::default());
+		assert_eq!(run(&case), Outcome::Violated);
+	}
+
+	#[test]
+	fn a_missing_slot_fails_even_deep_in_a_call() {
+		// The pair reads token 1's balance of itself inside `swap`, three calls deep.
+		let mut case = pair_exploit();
+		let token1 = case.report.accounts.iter_mut().find(|a| a.address == token(1)).unwrap();
+		token1.slots.retain(|s| s.key != B256::from(mapping_slot(pair(0), 0)));
+		assert_eq!(run(&case), Outcome::TxFailed);
+	}
+
+	#[test]
+	fn a_protocol_cannot_single_out_hunters() {
+		// Token 0 refuses deposits from any account it can work out is a hunter. It mustn't be
+		// able to: the exploit still wins.
+		let mut world = pairs_world(1, U256::ZERO);
+		world.accounts.get_mut(&token(0)).unwrap().code = rigged_token_code();
+		let case = case("rigged", &world, pair_invariant(), exploit_txs(hunter(&world)), Reads::default());
+		assert_eq!(run(&case), Outcome::Violated);
+	}
+
+	#[test]
+	fn trailing_bytes_are_malformed() {
+		let case = pair_exploit();
+		let (params, report) = (alloy_rlp::encode(&case.params), alloy_rlp::encode(&case.report));
+		let more = |b: &[u8]| [b, &[0][..]].concat();
+		assert_eq!(evm_bounty_check::run(&more(&params), &report), Outcome::Malformed);
+		assert_eq!(evm_bounty_check::run(&params, &more(&report)), Outcome::Malformed);
+	}
+
+	#[test]
+	fn the_transactions_fit_one_block() {
+		// 30M gas of compute, in three transactions, into a block of 25M.
+		let mut case = burn("burn-30m", 30_000_000);
+		assert_eq!(run(&case), Outcome::Holds);
+		case.params.gas_limit = 25_000_000;
+		assert_eq!(run(&case), Outcome::TxFailed);
+	}
+
+	#[test]
+	fn hunters_pay_for_gas() {
+		// 1 wei covers the exploit's deposit but not its gas, at a 1 gwei base fee.
+		let mut case = pair_exploit();
+		case.params.capital = U256::from(1);
 		assert_eq!(run(&case), Outcome::TxFailed);
 	}
 
@@ -614,7 +715,7 @@ mod tests {
 	fn a_report_cannot_prove_a_hunter() {
 		let mut case = pair_exploit();
 		let mut fake = case.report.accounts[0].clone();
-		fake.address = hunter();
+		fake.address = evm_bounty_check::hunter(case.params.state_root, 0);
 		case.report.accounts.push(fake);
 		assert_eq!(run(&case), Outcome::Malformed);
 	}

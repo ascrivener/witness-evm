@@ -9,6 +9,6 @@ authors.workspace = true
 [dependencies]
 evm-bounty-check = { path = "../../check" }
 witness-types = { workspace = true, features = ["std"] }
-revm = { version = "43.0.3", default-features = false, features = ["std", "optional_no_base_fee"] }
+revm = { version = "43.0.3", default-features = false, features = ["std"] }
 alloy-trie = { version = "0.9.8" }
 alloy-rlp = { version = "0.3" }
