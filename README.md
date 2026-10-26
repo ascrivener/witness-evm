@@ -6,8 +6,10 @@ our contracts, on block N's state", and a hunter's report is paid automatically 
 human judge: the check replays the report's transactions in [revm](https://github.com/bluealloy/revm)
 against Merkle-proven Ethereum state and runs the invariant before and after.
 
-It runs a bounty end to end in witness-sim: posted, a fair swap and a forged report refused, the
-real exploit (a 29 KB report, 9.4×10⁶ gas to check) accepted and paid. See
+It runs a bounty end to end, in witness-sim or on a local PolkaJam testnet: posted with a
+disclosure window, the exploit disclosed privately and verified by the protocol off chain, its
+early reveal refused, then a fair swap and a forged report refused and the real exploit (a 29 KB
+report, 9.4×10⁶ gas to check) accepted and paid. See
 [docs/design.md](docs/design.md) for the measurements, the go/no-go, and what's next.
 
 ## How it works
@@ -27,8 +29,9 @@ real exploit (a 29 KB report, 9.4×10⁶ gas to check) accepted and paid. See
 - **As mainnet would run it:** hunters pay gas at the block's base fee, and their transactions
   together fit one block's gas limit, so a win is one a real attacker could have.
 - **Disclosure:** the hunter commits (witness's commit-reveal fixes priority), discloses
-  privately, and reveals after the patch. The check replays block N's state, so the report still
-  wins against the patched protocol, and the protocol can't refuse to pay.
+  privately, and reveals after the patch: the bounty's `disclosure_window` refuses any reveal
+  until that many slots after its commitment. The check replays block N's state, so the report
+  still wins against the patched protocol, and the protocol can't refuse to pay.
 
 ## Numbers
 
@@ -54,7 +57,8 @@ tools/evm-report/          builds test cases: toy contracts (contracts/Toys.sol)
                            with mainnet-deep proofs; the reports a hunter's tooling would write;
                            `evm-report lint`, the invariant lint
 scripts/gas.sh             measures the check's gas, phase by phase, on evm-report's cases
-scripts/demo.sh            a settled bug bounty in witness-sim: posted, three reports revealed, paid
+scripts/demo.sh            a settled bug bounty, in witness-sim or on a testnet: posted, disclosed,
+                           three reports revealed after the window, paid
 docs/design.md             the spike: design, measurements, go/no-go, scope
 docs/review.md             adversarial review of the check, first pass: what's fixed, what's open
 docs/invariants.md         how to write a bounty's invariant, and the lint that checks one
@@ -69,7 +73,8 @@ scripts also need a witness checkout at that commit, for witness-sim, its CLI an
 ```bash
 cargo test                                  # the cases natively: the exploit wins, forgeries fail
 cargo jam-build --out-dir out               # the check blob, out/evm-bounty-check.jam (1.1 MB)
-WITNESS_DIR=../witness scripts/demo.sh      # a bounty, posted to paid, in witness-sim (~35 s)
+WITNESS_DIR=../witness scripts/demo.sh      # a bounty, posted to paid, in witness-sim (~50 s)
+WITNESS_DIR=../witness POLKAJAM_DIR=../polkajam-v0.1.29 scripts/demo.sh --testnet  # on a testnet
 WITNESS_DIR=../witness scripts/gas.sh       # the gas table in docs/design.md
 ```
 
