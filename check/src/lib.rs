@@ -39,6 +39,7 @@ use alloy_rlp::{Decodable, RlpDecodable, RlpEncodable};
 use alloy_trie::{EMPTY_ROOT_HASH, Nibbles, proof::verify_proof};
 use revm::{
 	Context, Database, ExecuteEvm, MainBuilder, MainContext,
+	handler::MainnetContext,
 	bytecode::Bytecode,
 	context::{
 		TxEnv,
@@ -265,7 +266,8 @@ fn prove(db: &mut ProvenDb, state_root: B256, witness: &AccountWitness) -> Resul
 	Ok(())
 }
 
-fn invariant_call(params: &Params) -> TxEnv {
+/// The transaction that runs the invariant.
+pub fn invariant_call(params: &Params) -> TxEnv {
 	TxEnv {
 		caller: INVARIANT_CALLER,
 		kind: TxKind::Call(INVARIANT),
@@ -343,19 +345,11 @@ pub fn made_up(params: &Params) -> Vec<(Address, AccountInfo)> {
 	accounts
 }
 
-/// Run the invariant, the transactions and the invariant again on `db`, from phase
-/// [`Phase::Proofs`] on, adding the transactions' EVM gas to `evm_gas`. The check runs it on proven
-/// state; host tools run it on whatever state they have, to see what a report has to prove. `db`
-/// must answer for the accounts [`made_up`] makes up as it says.
-pub fn replay<DB: Database>(
-	params: &Params,
-	db: DB,
-	txs: Vec<Tx>,
-	stop_after: u8,
-	evm_gas: &mut u64,
-) -> Result<Outcome, Outcome> {
+/// revm's context for a bounty: its fork, chain and block, on `db`. [`replay`] builds its EVM from
+/// it; host tools build theirs the same way, to run what the check runs.
+pub fn context<DB: Database>(params: &Params, db: DB) -> Result<MainnetContext<DB>, Outcome> {
 	let spec = SpecId::try_from_u8(params.spec).ok_or(Outcome::Malformed)?;
-	let mut evm = Context::mainnet()
+	Ok(Context::mainnet()
 		.with_db(db)
 		.modify_cfg_chained(|cfg| {
 			cfg.set_spec_and_mainnet_gas_params(spec);
@@ -369,8 +363,21 @@ pub fn replay<DB: Database>(
 			block.basefee = params.basefee;
 			block.beneficiary = params.coinbase;
 			block.prevrandao = Some(params.prevrandao);
-		})
-		.build_mainnet();
+		}))
+}
+
+/// Run the invariant, the transactions and the invariant again on `db`, from phase
+/// [`Phase::Proofs`] on, adding the transactions' EVM gas to `evm_gas`. The check runs it on proven
+/// state; host tools run it on whatever state they have, to see what a report has to prove. `db`
+/// must answer for the accounts [`made_up`] makes up as it says.
+pub fn replay<DB: Database>(
+	params: &Params,
+	db: DB,
+	txs: Vec<Tx>,
+	stop_after: u8,
+	evm_gas: &mut u64,
+) -> Result<Outcome, Outcome> {
+	let mut evm = context(params, db)?.build_mainnet();
 
 	// `transact` drops the journal after the invariant runs, so it can't change the state the
 	// transactions start from.

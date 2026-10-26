@@ -26,6 +26,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use evm_bounty_check::Outcome;
 
+pub mod lint;
+
 /// How deep a trie's proofs are: `full` levels of 16-way branches, then `sparse` levels of
 /// branches with [`SPARSE_SIBLINGS`] siblings, then the leaf.
 #[derive(Clone, Copy, Debug)]
@@ -364,6 +366,18 @@ pub fn burn_code() -> Bytes {
 pub fn rigged_token_code() -> Bytes {
 	code(include_str!("../contracts/RiggedToken.hex"))
 }
+pub fn vault_code() -> Bytes {
+	code(include_str!("../contracts/Vault.hex"))
+}
+pub fn fixed_strategy_code() -> Bytes {
+	code(include_str!("../contracts/FixedStrategy.hex"))
+}
+pub fn vault_assets_invariant() -> Bytes {
+	code(include_str!("../contracts/VaultAssetsInvariant.hex"))
+}
+pub fn vault_balance_invariant() -> Bytes {
+	code(include_str!("../contracts/VaultBalanceInvariant.hex"))
+}
 pub fn pair_invariant() -> Bytes {
 	code(include_str!("../contracts/PairInvariant.hex"))
 }
@@ -439,6 +453,35 @@ pub fn pairs_world(n: u64, float: U256) -> World {
 		world.accounts.insert(pair(i), p);
 	}
 	world
+}
+
+pub const VAULT: Address = at(0xe000);
+pub const STRATEGY: Address = at(0xe001);
+
+/// A vault holding [`ETHER`] × 1000 of token 0 against as much in deposits, with one strategy that
+/// says it holds nothing.
+pub fn vault_world() -> World {
+	let mut world = World::default();
+	world.accounts.insert(COINBASE, Account::eoa(U256::from(ETHER)));
+	let held = U256::from(1000 * ETHER);
+	let mut t = Account::contract(token_code(), BIG_STORAGE);
+	t.storage.insert(mapping_slot(VAULT, 0), held);
+	t.storage.insert(U256::from(2), held);
+	world.accounts.insert(token(0), t);
+	let mut v = Account::contract(vault_code(), SMALL_STORAGE);
+	v.storage.insert(U256::ZERO, word(token(0)));
+	v.storage.insert(U256::from(1), held);
+	// `strategies`: its length at slot 2, its entries from keccak256(2).
+	v.storage.insert(U256::from(2), U256::from(1));
+	v.storage.insert(keccak256(U256::from(2).to_be_bytes::<32>()).into(), word(STRATEGY));
+	world.accounts.insert(VAULT, v);
+	world.accounts.insert(STRATEGY, Account::contract(fixed_strategy_code(), SMALL_STORAGE));
+	world
+}
+
+/// Params for a bounty on `world` with `invariant`.
+pub fn params_for(world: &World, invariant: Bytes) -> Params {
+	bounty(world, invariant, Vec::new(), Reads::default()).0
 }
 
 /// Uniswap V2's amount out, for `amount_in` against equal reserves.

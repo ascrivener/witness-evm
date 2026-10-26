@@ -125,3 +125,49 @@ contract PairInvariant {
 		return abi.encode(r0 * r1 >= K0);
 	}
 }
+
+interface IStrategy {
+	function assets() external view returns (uint256);
+}
+
+/// A vault that counts its token balance plus what its strategies say they hold. Anyone can add
+/// a strategy, so a strategy's answer is anyone's word. Slots: token 0, deposits 1, strategies 2.
+contract Vault {
+	Token public token;
+	uint256 public deposits;
+	address[] public strategies;
+
+	function addStrategy(address strategy) external {
+		strategies.push(strategy);
+	}
+
+	function totalAssets() external view returns (uint256 total) {
+		total = token.balanceOf(address(this));
+		for (uint256 i = 0; i < strategies.length; i++) total += IStrategy(strategies[i]).assets();
+	}
+}
+
+/// A strategy that says it holds a fixed amount. Slot: assets 0.
+contract FixedStrategy {
+	uint256 public assets;
+}
+
+/// "The vault holds what it owes", asked of the vault, and so of every strategy anyone added:
+/// the invariant the lint warns about.
+contract VaultAssetsInvariant {
+	Vault constant VAULT = Vault(0x000000000000000000000000000000000000e000);
+
+	fallback(bytes calldata) external returns (bytes memory) {
+		return abi.encode(VAULT.totalAssets() >= VAULT.deposits());
+	}
+}
+
+/// The same, read from the token's own books: what the vault holds, not what it is told.
+contract VaultBalanceInvariant {
+	Vault constant VAULT = Vault(0x000000000000000000000000000000000000e000);
+	Token constant TOKEN = Token(0x000000000000000000000000000000000000b000);
+
+	fallback(bytes calldata) external returns (bytes memory) {
+		return abi.encode(TOKEN.balanceOf(address(VAULT)) >= VAULT.deposits());
+	}
+}
