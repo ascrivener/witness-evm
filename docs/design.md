@@ -170,8 +170,8 @@ Soundness, before money depends on it:
    review, and the open items it lists.
 4. **Invariants that revert.** If the invariant reverts or runs out of gas after the
    transactions, the report loses, rather than letting a hunter "break" an invariant by making
-   it too expensive to evaluate. So invariants must be cheap and total; that is guidance for
-   makers, and something invariant tooling should check.
+   it too expensive to evaluate. So invariants must be cheap and total: rule 5 of
+   [invariants.md](invariants.md), and the lint warns past a quarter of the gas.
 5. **`BLOCKHASH`** fails the check. Supporting it means proving the last 256 headers (or the
    EIP-2935 history contract's storage), which a light client would provide.
 
@@ -220,6 +220,7 @@ within X of the TWAP". Bounty terms have to fix the constants (here, k at block 
 token-dependent invariants need care, since hunters can move prices within the replay; that is
 the point, but makers must decide which moves count as a bug. Writing and auditing invariants is
 a service in itself: probably the business's main product, more than the check.
+[invariants.md](invariants.md) is the guide so far, with `evm-report lint` to check one.
 
 ### Milestones
 

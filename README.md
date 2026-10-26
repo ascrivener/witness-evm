@@ -51,11 +51,13 @@ limit.
 ```
 check/                     the check (crate evm-bounty-check): revm 43, no_std, over alloy-trie
 tools/evm-report/          builds test cases: toy contracts (contracts/Toys.sol) in synthetic state
-                           with mainnet-deep proofs; the reports a hunter's tooling would write
+                           with mainnet-deep proofs; the reports a hunter's tooling would write;
+                           `evm-report lint`, the invariant lint
 scripts/gas.sh             measures the check's gas, phase by phase, on evm-report's cases
 scripts/demo.sh            a settled bug bounty in witness-sim: posted, three reports revealed, paid
 docs/design.md             the spike: design, measurements, go/no-go, scope
 docs/review.md             adversarial review of the check, first pass: what's fixed, what's open
+docs/invariants.md         how to write a bounty's invariant, and the lint that checks one
 ```
 
 ## Build and test

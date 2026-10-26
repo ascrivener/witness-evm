@@ -19,6 +19,7 @@ for (const e of out.errors || []) {
 	if (e.severity === 'error') process.exit(1);
 }
 for (const [name, c] of Object.entries(out.contracts['Toys.sol'])) {
+	if (!c.evm.deployedBytecode.object) continue; // an interface
 	fs.writeFileSync(path.join(dir, `${name}.hex`), c.evm.deployedBytecode.object + '\n');
 	console.log(name, c.evm.deployedBytecode.object.length / 2, 'bytes');
 }

@@ -11,6 +11,10 @@
 //!
 //! writes the demo bounty's params, as hex, to `OUT_DIR/bounty.params`, and its three reports
 //! (see `evm_report::pair_bounty`) to `fair.report`, `exploit.report` and `forged.report`.
+//!
+//!     evm-report lint
+//!
+//! lints the toy invariants (see `evm_report::lint` and `docs/invariants.md`).
 
 use evm_bounty_check::{Report, run_measured};
 use std::{io::Write, path::PathBuf, process::ExitCode, time::Instant};
@@ -19,10 +23,11 @@ use witness_types::{CheckMode, check_args};
 fn main() -> ExitCode {
 	let args: Vec<String> = std::env::args().skip(1).collect();
 	let out = match args.as_slice() {
+		[lint] if lint == "lint" => return lint_toys(),
 		[out] => out,
 		[demo, out] if demo == "demo" => return write_demo(&PathBuf::from(out)),
 		_ => {
-			eprintln!("usage: evm-report [demo] OUT_DIR");
+			eprintln!("usage: evm-report [demo] OUT_DIR | evm-report lint");
 			return ExitCode::FAILURE;
 		},
 	};
@@ -78,6 +83,25 @@ fn write_demo(out: &PathBuf) -> ExitCode {
 	std::fs::write(out.join("bounty.params"), format!("0x{hex}\n")).expect("write params");
 	for (name, report) in ["fair", "exploit", "forged"].iter().zip(reports) {
 		std::fs::write(out.join(format!("{name}.report")), alloy_rlp::encode(&report)).expect("write report");
+	}
+	ExitCode::SUCCESS
+}
+
+fn lint_toys() -> ExitCode {
+	use evm_report::*;
+	let pairs = pairs_world(1, revm::primitives::U256::ZERO);
+	let vault = vault_world();
+	let invariants = [
+		("PairInvariant", &pairs, pair_invariant()),
+		("VaultAssetsInvariant", &vault, vault_assets_invariant()),
+		("VaultBalanceInvariant", &vault, vault_balance_invariant()),
+	];
+	for (name, world, code) in invariants {
+		let lint = lint::lint(&params_for(world, code), world);
+		println!("{name}: holds {:?}, {} gas, ran code at {} accounts", lint.holds, lint.gas_used, lint.code_run.len());
+		for finding in &lint.findings {
+			println!("  {:?}: {}", finding.severity, finding.message);
+		}
 	}
 	ExitCode::SUCCESS
 }
