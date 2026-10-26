@@ -197,9 +197,15 @@ state, a snapshot**, so the exploit still verifies after the protocol has patche
    protocol can't refuse to pay or quibble over severity: the escrow is locked and the check is
    the judge.
 
-The bounty's terms need a window long enough to patch (expiry well after posting, and a minimum
-time between commit and reveal), and protocols must re-post with a fresh N after upgrades, since
-a bounty on old state pays for bugs that state had. JAM's data availability keeps reports
+witness enforces the window: a bounty's `disclosure_window` (up to about 90 days) refuses any
+reveal until that many slots after its commitment, and keeps the reward escrowed until every
+commitment made before expiry has had its window. Every commitment waits the same, so an
+earlier one is always revealable first: if the disclosure leaks, or the protocol tries to claim
+the report itself, its later commitment loses. The protocol checks a disclosed report with
+`witness commitment` (the hash it should find on chain) and `evm-report args` plus
+`witness-sim check` (the verdict the chain will reach). `scripts/demo.sh` runs this flow.
+Protocols must still re-post with a fresh N after upgrades, since a bounty on old state pays for
+bugs that state had. JAM's data availability keeps reports
 fetchable for weeks for anyone auditing a payout. Stronger privacy (revealing only that *some*
 report wins) would take ZK proofs of the same replay or a TEE; both are much heavier than this,
 and not needed for v1.
@@ -226,11 +232,15 @@ a service in itself: probably the business's main product, more than the check.
 
 1. ~~Make reports extrinsics; get the blob under the limit.~~ Done.
 2. Adversarial hardening of the check (items 3–5 above), with a review by someone outside.
-3. Bounty terms for disclosure: patch window, minimum commit-to-reveal delay.
-4. A witness-sim demo, **started**: `scripts/demo.sh` runs a bounty from posting to
-   payout. A protocol escrows 5000 on its pair; a fair swap and an exploit on forged state are
-   refused; the real exploit (a 29 KB report, carried as an extrinsic, 9.4×10⁶ gas to check)
-   opens the claim window and is paid at finalize. Still to do: about a dozen cases, including
+3. ~~Bounty terms for disclosure: patch window, minimum commit-to-reveal delay.~~ Done:
+   witness's `disclosure_window`.
+4. A demo, **started**: `scripts/demo.sh` runs a bounty from posting to payout, in witness-sim
+   or (`--testnet`) on a local PolkaJam testnet. A protocol escrows 5000 on its pair, with a
+   disclosure window; the hunter with the exploit discloses it privately, and the protocol
+   verifies the report off chain; his reveal is refused until the window has passed. Then a
+   fair swap and an exploit on forged state are refused, and the real exploit (a 29 KB report,
+   carried as an extrinsic, 9.4×10⁶ gas to check) opens the claim window and is paid at
+   finalize. Still to do: about a dozen cases, including
    measurements on real mainnet state (needs an RPC, and an archive node for older blocks), and
    real-size contract code.
 5. State roots from a light client.
@@ -259,6 +269,7 @@ paid by a check, with nothing to negotiate. Risks:
 cargo test                                  # the cases natively, including the exploit winning
 WITNESS_DIR=../witness scripts/gas.sh       # build everything and print the table above
 WITNESS_DIR=../witness scripts/demo.sh      # a bounty, posted to paid, in witness-sim
+WITNESS_DIR=../witness POLKAJAM_DIR=... scripts/demo.sh --testnet   # the same on a PolkaJam testnet
 ```
 
 PolkaVM's recompiler needs `userfaultfd`. In a container that forbids it unprivileged, run

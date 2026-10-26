@@ -12,6 +12,12 @@
 //! writes the demo bounty's params, as hex, to `OUT_DIR/bounty.params`, and its three reports
 //! (see `evm_report::pair_bounty`) to `fair.report`, `exploit.report` and `forged.report`.
 //!
+//!     evm-report args PARAMS REPORT OUT
+//!
+//! writes the check's arguments for a report to OUT (reveal mode, the report as the witness), for
+//! `witness-sim check`: how a protocol given a report privately checks it before it goes on chain.
+//! PARAMS is a file holding the bounty's params as hex (as `demo` writes them), REPORT the report.
+//!
 //!     evm-report lint
 //!
 //! lints the toy invariants (see `evm_report::lint` and `docs/invariants.md`).
@@ -26,8 +32,9 @@ fn main() -> ExitCode {
 		[lint] if lint == "lint" => return lint_toys(),
 		[out] => out,
 		[demo, out] if demo == "demo" => return write_demo(&PathBuf::from(out)),
+		[cmd, params, report, out] if cmd == "args" => return write_args(params, report, out),
 		_ => {
-			eprintln!("usage: evm-report [demo] OUT_DIR | evm-report lint");
+			eprintln!("usage: evm-report [demo] OUT_DIR | evm-report args PARAMS REPORT OUT | evm-report lint");
 			return ExitCode::FAILURE;
 		},
 	};
@@ -84,6 +91,15 @@ fn write_demo(out: &PathBuf) -> ExitCode {
 	for (name, report) in ["fair", "exploit", "forged"].iter().zip(reports) {
 		std::fs::write(out.join(format!("{name}.report")), alloy_rlp::encode(&report)).expect("write report");
 	}
+	ExitCode::SUCCESS
+}
+
+fn write_args(params: &str, report: &str, out: &str) -> ExitCode {
+	let hex = std::fs::read_to_string(params).expect("read PARAMS");
+	let hex = hex.trim().trim_start_matches("0x");
+	let params = evm_report::hex_bytes(hex);
+	let report = std::fs::read(report).expect("read REPORT");
+	std::fs::write(out, check_args(CheckMode::Reveal, &[], &params, &report)).expect("write OUT");
 	ExitCode::SUCCESS
 }
 
