@@ -93,6 +93,26 @@ bounty's ETH capital, so that's the attacker a bounty prices:
 - Capital: the ETH you give hunters, plus anything they can borrow or trade for on chain within
   the block. Flash loans are in scope if the lenders are in the state the report proves.
 
+### 7. Allow for what anyone may already do
+
+Hunters can do anything an ordinary user can, including actions that are honest. An invariant
+that an honest action breaks pays for no bug. Bridges are the sharp case. Relaying a valid
+message is open to anyone, so a cap on a bridged token's supply at its value at N is broken by a
+hunter who relays a real transfer that was pending at N. That's measured on mainnet: an honest
+relay, replayed from hunter accounts, breaks a strict supply cap.
+
+So a bridge's cap is **the supply at N plus what honest relays could still mint at N**. That's
+every message whose proof is against a commitment the bridge holds at N, whose challenge period
+has passed by block N + 1, and that hasn't been delivered yet. The maker computes it when posting
+the bounty, from the source chain or the bridge's indexer, and bakes it into the invariant as a
+constant. Don't loosen the cap with a margin instead (twice the supply, say), because a margin
+hides any theft smaller than itself. A pending-aware cap is exact. Replayed on mainnet, it lets
+the honest relay through and still catches a real exploit, both its billion-token mint and its
+10,000-token probe, which a 2× margin would miss.
+
+Prefer caps on supply or balances to invariants about roles. "No new account holds the minter
+role" can't be checked in EVM, since an invariant can't list every account.
+
 ## The lint
 
 `evm-report lint` runs an invariant once on block N's state, as the check does, and watches.
