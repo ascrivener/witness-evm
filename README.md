@@ -55,10 +55,12 @@ limit.
 check/                     the check (crate evm-bounty-check): revm 43, no_std, over alloy-trie
 tools/evm-report/          builds test cases: toy contracts (contracts/Toys.sol) in synthetic state
                            with mainnet-deep proofs; the reports a hunter's tooling would write;
-                           `evm-report lint`, the invariant lint
+                           `evm-report lint`, the invariant lint; `evm-report rpc`, a bounty and
+                           report on real chain state, from a JSON-RPC node
 scripts/gas.sh             measures the check's gas, phase by phase, on evm-report's cases
 scripts/demo.sh            a settled bug bounty, in witness-sim or on a testnet: posted, disclosed,
                            three reports revealed after the window, paid
+scripts/univ2-real.py      `evm-report rpc` on mainnet: a fair Uniswap V2 swap at a recent block
 docs/design.md             the spike: design, measurements, go/no-go, scope
 docs/review.md             adversarial review of the check, first pass: what's fixed, what's open
 docs/invariants.md         how to write a bounty's invariant, and the lint that checks one
@@ -81,13 +83,40 @@ WITNESS_DIR=../witness scripts/gas.sh       # the gas table in docs/design.md
 PolkaVM's recompiler needs `userfaultfd`. In a container that forbids it unprivileged, run
 `sysctl -w vm.unprivileged_userfaultfd=1` first.
 
+### Real chain state
+
+`evm-report rpc URL BLOCK INVARIANT TXS OUT_DIR` builds a bounty on block N's real state: N's
+state root, and block N + 1's environment. It replays the transactions (a JSON list; `HUNTER0`
+to `HUNTER3` stand for the hunters' addresses) on the state the node serves, records every
+account and slot the replay and the invariant read, and proves exactly those with `eth_getProof`
+at N, checking each proof against the root as it goes. It writes `bounty.params`, `report` and a
+summary, and runs the check natively on them.
+
+Old blocks need a node that serves `eth_getProof` on archive state. Some public endpoints do
+(`https://eth-mainnet.public.blastapi.io` and `https://rpc.mevblocker.io`, as of November 2026);
+others prove only recent blocks, or need a key.
+
+```bash
+cargo build --release -p evm-report
+scripts/univ2-real.py https://eth-mainnet.public.blastapi.io out/univ2   # a fair swap: Holds
+```
+
+On mainnet block 26,320,544, the fair swap's report proves 5 accounts and 13 slots: 126 proof
+nodes, 40 KB of code and 94 KB in all, checked natively in about 1 ms.
+
+Invariants on bridges need care. Relaying a valid message is open to anyone, so if a bounty caps
+a bridged token's supply at its value at N, a hunter who relays a real transfer that was pending
+at N breaks the cap, and wins, without any bug. Measured on mainnet: replaying an honest relay
+from hunter accounts breaks a strict supply cap. The cap must allow for the messages already
+committed at N but not yet delivered, which the maker can compute when posting the bounty.
+
 CI reads witness, a private repository, with a token: a fine-grained personal access token with
 read access to its contents, saved as the `WITNESS_READ_TOKEN` secret.
 
 ## Limitations
 
-- All test cases are toy contracts in synthetic state; nothing yet runs on real mainnet state or
-  real-size contract code.
+- `evm-report rpc` builds reports on real mainnet state, but its gas in PolkaVM hasn't been
+  measured yet: `scripts/gas.sh` measures only the synthetic cases.
 - `BLOCKHASH` fails the check.
 - The protocol commits its own state root; a light client would remove that trust.
 - The check has had one adversarial review, by its author's tooling

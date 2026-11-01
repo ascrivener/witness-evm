@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use evm_bounty_check::Outcome;
 
 pub mod lint;
+pub mod rpc;
 
 /// How deep a trie's proofs are: `full` levels of 16-way branches, then `sparse` levels of
 /// branches with [`SPARSE_SIBLINGS`] siblings, then the leaf.
